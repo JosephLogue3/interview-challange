@@ -7,8 +7,6 @@ Run with: pytest tests/ -v
 from fastapi.testclient import TestClient
 from app.main import app
 
-# Tests will fail if WireMock isn't running, and can't be run in CI without the mock server.
-# External dependencies should be mocked (e.g. with unittest.mock or respx).
 client = TestClient(app)
 
 

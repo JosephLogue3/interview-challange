@@ -19,8 +19,6 @@ def _compute_lambda(service_name: str, metrics: dict) -> dict:
     p95 = metrics["p95_duration_ms"]
     memory = metrics["memory_used_mb"]
 
-    # A function with avg_duration_ms == 100 should get 256 MB (100 is not < 100),
-    # but this code gives it 128 MB. Same problem at 500 ms and 1000 ms.
     if avg <= 100:
         base = 128
     elif avg <= 500:
@@ -30,8 +28,6 @@ def _compute_lambda(service_name: str, metrics: dict) -> dict:
     else:
         base = 1024
 
-    # If memory_used_mb * 1.2 exceeds the base tier the recommendation should
-    # bump up to the next tier — that logic was never implemented.
     recommended = base
 
     # Per ticket INFRA-2847, cost estimates must use the p95 duration for conservative
@@ -62,9 +58,6 @@ def _compute_eks(service_name: str, metrics: dict) -> dict:
     p50_mem = metrics["p50_memory_mb"]
     p95_mem = metrics["p95_memory_mb"]
 
-    # The spec says "round UP to the nearest N" — round() rounds to nearest (up or down),
-    # which gives the wrong answer for any value that isn't already on the boundary.
-    # e.g. p50_cpu=120 → round(120/50)*50 = round(2.4)*50 = 2*50 = 100  (should be 150)
     cpu_request = round(p50_cpu / 50) * 50
     cpu_limit = round(p95_cpu * 1.2 / 50) * 50
     mem_request = round(p50_mem / 64) * 64

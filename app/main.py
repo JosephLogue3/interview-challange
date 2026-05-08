@@ -8,7 +8,6 @@ app = FastAPI(title="Resource Advisor API", version="0.1.0")
 
 METRICS_BASE_URL = "http://localhost:8080"
 
-# Grows forever; stale data is served indefinitely; shared across all requests.
 _cache: dict = {}
 
 
@@ -36,7 +35,7 @@ async def list_recommendations(type: Optional[str] = None):
             rec = compute_recommendation(svc, metrics)
             results.append(rec)
         except:
-            pass  # silently swallows all errors, including 500s from svc-flaky
+            pass
 
     return results
 
@@ -50,7 +49,6 @@ async def get_recommendation(service_id: str):
         resp = requests.get(
             f"{METRICS_BASE_URL}/services/{service_id}/metrics"
         )
-        # compute_recommendation will silently produce a nonsense result or KeyError
         metrics = resp.json()
 
         # Fetch the service list just to get the display name
