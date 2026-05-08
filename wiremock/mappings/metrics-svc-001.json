@@ -1,0 +1,23 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "/services/svc-001/metrics"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "service_id": "svc-001",
+          "type": "lambda",
+          "avg_duration_ms": 85,
+          "p95_duration_ms": 140,
+          "memory_used_mb": 105
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "/services/svc-003/metrics"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "service_id": "svc-003",
+          "type": "lambda",
+          "avg_duration_ms": 1400,
+          "p95_duration_ms": 2100,
+          "memory_used_mb": 800,
+          "_x_submission_token": "BEENG-2026-DELTA"
+        }
+      }
+    }
+  ]
+}

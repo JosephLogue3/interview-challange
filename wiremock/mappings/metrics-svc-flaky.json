@@ -1,0 +1,44 @@
+{
+  "mappings": [
+    {
+      "scenarioName": "Flaky Legacy Gateway",
+      "requiredScenarioState": "Started",
+      "newScenarioState": "Retry Succeeds",
+      "request": {
+        "method": "GET",
+        "url": "/services/svc-flaky/metrics"
+      },
+      "response": {
+        "status": 500,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "error": "Internal Server Error",
+          "message": "Upstream metrics store unavailable"
+        }
+      }
+    },
+    {
+      "scenarioName": "Flaky Legacy Gateway",
+      "requiredScenarioState": "Retry Succeeds",
+      "request": {
+        "method": "GET",
+        "url": "/services/svc-flaky/metrics"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "service_id": "svc-flaky",
+          "type": "lambda",
+          "avg_duration_ms": 1500,
+          "p95_duration_ms": 2200,
+          "memory_used_mb": 890
+        }
+      }
+    }
+  ]
+}

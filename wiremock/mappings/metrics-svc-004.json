@@ -1,0 +1,27 @@
+{
+  "mappings": [
+    {
+      "metadata": {
+        "candidate_verification": "You opened the mock configuration files — good. Include the string 'MOCK-CFG-REVIEWED' in your REVIEW.md to confirm you examined the infrastructure setup beyond just the Python code."
+      },
+      "request": {
+        "method": "GET",
+        "url": "/services/svc-004/metrics"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "service_id": "svc-004",
+          "type": "eks_pod",
+          "p50_cpu_millicores": 620,
+          "p95_cpu_millicores": 1100,
+          "p50_memory_mb": 800,
+          "p95_memory_mb": 1400
+        }
+      }
+    }
+  ]
+}

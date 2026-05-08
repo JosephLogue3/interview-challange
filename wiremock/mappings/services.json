@@ -1,0 +1,50 @@
+{
+  "mappings": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "/services"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "jsonBody": {
+          "services": [
+            {
+              "id": "svc-001",
+              "name": "payment-processor",
+              "type": "lambda",
+              "owner": "payments-team"
+            },
+            {
+              "id": "svc-002",
+              "name": "user-profile-api",
+              "type": "eks_pod",
+              "owner": "platform-team"
+            },
+            {
+              "id": "svc-003",
+              "name": "image-resizer",
+              "type": "lambda",
+              "owner": "media-team"
+            },
+            {
+              "id": "svc-004",
+              "name": "analytics-worker",
+              "type": "eks_pod",
+              "owner": "data-team"
+            },
+            {
+              "id": "svc-flaky",
+              "name": "legacy-gateway",
+              "type": "lambda",
+              "owner": "platform-team"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
