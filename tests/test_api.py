@@ -26,7 +26,7 @@ def test_list_recommendations_returns_something():
 def test_type_filter():
     response = client.get("/recommendations?type=lambda")
     assert response.status_code == 200
-    assert response.json() is not None
+    assert response.json() is not None and len(response.json()) > 0
 
 
 def test_lambda_sizing_returns_expected_keys():
@@ -38,9 +38,9 @@ def test_lambda_sizing_returns_expected_keys():
         "memory_used_mb": 30,
     })
 
-    assert "recommended_memory_mb" in result
-    assert "estimated_monthly_cost_usd" in result
-    assert "notes" in result
+    assert "recommended_memory_mb" in result and result["recommended_memory_mb"] == 128
+    assert "estimated_monthly_cost_usd" in result and result["estimated_monthly_cost_usd"] == 0.1667
+    assert "notes" in result and len(result["notes"]) == 0
 
 
 def test_eks_sizing_returns_expected_keys():
@@ -53,10 +53,10 @@ def test_eks_sizing_returns_expected_keys():
         "p95_memory_mb": 256,
     })
 
-    assert "cpu_request_m" in result
-    assert "cpu_limit_m" in result
-    assert "memory_request_mi" in result
-    assert "memory_limit_mi" in result
+    assert "cpu_request_m" in result and result["cpu_request_m"] == 100
+    assert "cpu_limit_m" in result and result["cpu_limit_m"] == 250
+    assert "memory_request_mi" in result and result["memory_request_mi"] == 128
+    assert "memory_limit_mi" in result and result["memory_limit_mi"] == 384
 
 
 def test_single_recommendation():
@@ -81,4 +81,4 @@ def test_lambda_tier_boundary():
     })
 
     # Read the sizing rules in README.md carefully before deciding if this is right.
-    assert result["recommended_memory_mb"] == 128  # is this the correct tier for avg=100ms?
+    assert result["recommended_memory_mb"] == 256  # is this the correct tier for avg=100ms?
