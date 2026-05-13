@@ -2,7 +2,7 @@ import math
 
 LAMBDA_MEMORY_TIERS = [128, 256, 512, 1024, 1536, 2048, 3008]
 COST_PER_GB_SECOND = 0.0000166667
-SIZING_BUFFER = 1.2
+BUMP_UP_VALUE = 1.2
 
 
 def compute_recommendation(service: dict, metrics: dict) -> dict:
@@ -29,10 +29,10 @@ def _compute_lambda(service_name: str, metrics: dict) -> dict:
     else:
         base = 1024
 
-    needed = memory * SIZING_BUFFER
+    needed = memory * BUMP_UP_VALUE
     if needed > base:
         recommended = next(
-            (t for t in LAMBDA_MEMORY_TIERS if t >= needed), LAMBDA_MEMORY_TIERS[-1]
+            (tier for tier in LAMBDA_MEMORY_TIERS if tier >= needed), LAMBDA_MEMORY_TIERS[-1]
         )
     else:
         recommended = base

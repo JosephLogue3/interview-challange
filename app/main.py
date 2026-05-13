@@ -19,13 +19,20 @@ async def list_services():
         return resp.json()
 
 
-async def _fetch_recommendation(client: httpx.AsyncClient, svc: dict) -> dict:
-    resp = await client.get(
-        f"{METRICS_BASE_URL}/services/{svc['id']}/metrics"
-    )
-    resp.raise_for_status()
-    metrics = resp.json()
-    return compute_recommendation(svc, metrics)
+async def _fetch_recommendation(client: httpx.AsyncClient, svc: dict, max_retries: int = 5, delay: float = 0.5) -> dict:
+    for attempt in range(max_retries):
+        try:
+            resp = await client.get(
+                f"{METRICS_BASE_URL}/services/{svc['id']}/metrics"
+            )
+            resp.raise_for_status()
+            metrics = resp.json()
+            return compute_recommendation(svc, metrics)
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            if attempt == max_retries - 1:
+                raise
+            await asyncio.sleep(delay * (attempt + 1))
+    raise RuntimeError("Unreachable")
 
 
 @app.get("/recommendations")
@@ -40,7 +47,7 @@ async def list_recommendations(type: Optional[str] = None):
         tasks = [_fetch_recommendation(client, svc) for svc in services]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    return [r for r in results if not isinstance(r, Exception)]
+    return [result for result in results if not isinstance(result, Exception)]
 
 
 @app.get("/recommendations/{service_id}")
@@ -58,7 +65,7 @@ async def get_recommendation(service_id: str):
 
             all_services = (await client.get(f"{METRICS_BASE_URL}/services")).json()["services"]
             svc = next(
-                (s for s in all_services if s["id"] == service_id),
+                (service for service in all_services if service["id"] == service_id),
                 {"id": service_id, "name": service_id, "type": metrics.get("type")},
             )
 
