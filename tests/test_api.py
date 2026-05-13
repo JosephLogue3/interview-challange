@@ -166,20 +166,26 @@ def fake_metrics_api(monkeypatch):
             calls["services"] += 1
             return httpx.Response(200, json={"services": SERVICES})
 
+        # Matches GET /services/{id}/metrics from the app under test.
         prefix = "/services/"
         suffix = "/metrics"
         if path.startswith(prefix) and path.endswith(suffix):
             service_id = path.removeprefix(prefix).removesuffix(suffix)
+            # Per-call count (includes retries); used by flaky-service test.
             calls["metrics_by_service"][service_id] = (
                 calls["metrics_by_service"].get(service_id, 0) + 1
             )
+            # Track how many /metrics handlers are mid-flight at once; max > 1
+            # proves concurrent fetches when combined with sleep(0) below.
             calls["active_metrics"] += 1
             calls["max_active_metrics"] = max(
                 calls["max_active_metrics"],
                 calls["active_metrics"],
             )
+            # Yield so another gather task can enter this handler before we return.
             await asyncio.sleep(0)
             try:
+                # First metrics attempt for svc-flaky only: app should retry and succeed.
                 if (
                     service_id == "svc-flaky"
                     and calls["metrics_by_service"][service_id] == 1
@@ -216,6 +222,20 @@ def test_list_services_returns_service_payload(client):
     assert response.json() == {"services": SERVICES}
 
 
+def test_list_recommendations_fetches_metrics_concurrently(client, fake_metrics_api):
+    """GET /recommendations overlaps in-flight /metrics calls (asyncio.gather).
+
+    The mock yields after counting an active request; max_active_metrics > 1
+    only if another /metrics enters before the first leaves.
+    """
+    response = client.get("/recommendations")
+
+    assert response.status_code == 200
+    assert len(response.json()) == len(SERVICES)
+    assert fake_metrics_api["max_active_metrics"] > 1
+    assert set(fake_metrics_api["metrics_by_service"]) == {s["id"] for s in SERVICES}
+
+
 def test_list_recommendations_retries_flaky_service(
     client,
     fake_metrics_api,
@@ -224,8 +244,6 @@ def test_list_recommendations_retries_flaky_service(
 
     assert response.status_code == 200
     assert response.json() == EXPECTED_RECOMMENDATIONS
-    # asyncio.gather overlaps /metrics fetches; svc-flaky fails once then succeeds on retry.
-    assert fake_metrics_api["max_active_metrics"] > 1
     assert fake_metrics_api["metrics_by_service"]["svc-flaky"] == 2
 
 
