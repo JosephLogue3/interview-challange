@@ -1,3 +1,8 @@
+"""Tests for the Resource Advisor API.
+
+Run with: pytest tests/ -v
+"""
+
 import asyncio
 
 import httpx
@@ -5,12 +10,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
-
-"""
-Tests for the API
-
-Run with: pytest tests/ -v
-"""
 
 SERVICES = [
     {
@@ -67,7 +66,6 @@ METRICS = {
         "avg_duration_ms": 1400,
         "p95_duration_ms": 2100,
         "memory_used_mb": 800,
-        "_x_submission_token": "BEENG-2026-DELTA",
     },
     "svc-004": {
         "service_id": "svc-004",
@@ -136,12 +134,12 @@ EXPECTED_LAMBDA_RECOMMENDATIONS = [
 
 
 def _install_mock_transport(monkeypatch, handler):
-    transport = httpx.MockTransport(handler)
+    """Patch main to build httpx clients with MockTransport(handler); clear service caches."""
     monkeypatch.setattr(
         main,
-        "_metrics_client",
+        "_build_metrics_client",
         lambda: httpx.AsyncClient(
-            transport=transport,
+            transport=httpx.MockTransport(handler),
             base_url="http://metrics.test",
         ),
     )
@@ -150,11 +148,16 @@ def _install_mock_transport(monkeypatch, handler):
 
 @pytest.fixture
 def fake_metrics_api(monkeypatch):
+    """Mock metrics HTTP API; returns call counts (services, metrics_by_service).
+
+    svc-flaky metrics returns 500 once then 200 for retry tests.
+    active_metrics / max_active_metrics track overlapping /metrics calls.
+    """
     calls = {
-        "active_metrics": 0,
-        "max_active_metrics": 0,
         "metrics_by_service": {},
         "services": 0,
+        "active_metrics": 0,
+        "max_active_metrics": 0,
     }
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -175,23 +178,24 @@ def fake_metrics_api(monkeypatch):
                 calls["max_active_metrics"],
                 calls["active_metrics"],
             )
-            await asyncio.sleep(0.01)
-            calls["active_metrics"] -= 1
-
-            if (
-                service_id == "svc-flaky"
-                and calls["metrics_by_service"][service_id] == 1
-            ):
-                return httpx.Response(
-                    500,
-                    json={
-                        "error": "Internal Server Error",
-                        "message": "Upstream metrics store unavailable",
-                    },
-                )
-            if service_id in METRICS:
-                return httpx.Response(200, json=METRICS[service_id])
-            return httpx.Response(404, json={"error": "not found"})
+            await asyncio.sleep(0)
+            try:
+                if (
+                    service_id == "svc-flaky"
+                    and calls["metrics_by_service"][service_id] == 1
+                ):
+                    return httpx.Response(
+                        500,
+                        json={
+                            "error": "Internal Server Error",
+                            "message": "Upstream metrics store unavailable",
+                        },
+                    )
+                if service_id in METRICS:
+                    return httpx.Response(200, json=METRICS[service_id])
+                return httpx.Response(404, json={"error": "not found"})
+            finally:
+                calls["active_metrics"] -= 1
 
         return httpx.Response(404, json={"error": "not found"})
 
@@ -201,7 +205,8 @@ def fake_metrics_api(monkeypatch):
 
 @pytest.fixture
 def client(fake_metrics_api):
-    return TestClient(main.app)
+    with TestClient(main.app) as test_client:
+        yield test_client
 
 
 def test_list_services_returns_service_payload(client):
@@ -211,15 +216,15 @@ def test_list_services_returns_service_payload(client):
     assert response.json() == {"services": SERVICES}
 
 
-def test_list_recommendations_fetches_metrics_concurrently_and_retries_flaky_service(
+def test_list_recommendations_retries_flaky_service(
     client,
     fake_metrics_api,
 ):
     response = client.get("/recommendations")
 
     assert response.status_code == 200
-    data = response.json()
-    assert data == EXPECTED_RECOMMENDATIONS
+    assert response.json() == EXPECTED_RECOMMENDATIONS
+    # asyncio.gather overlaps /metrics fetches; svc-flaky fails once then succeeds on retry.
     assert fake_metrics_api["max_active_metrics"] > 1
     assert fake_metrics_api["metrics_by_service"]["svc-flaky"] == 2
 
@@ -283,6 +288,105 @@ def test_services_endpoint_uses_cached_payload(client, fake_metrics_api):
     assert fake_metrics_api["services"] == 1
 
 
+def test_services_cache_refreshes_after_ttl(monkeypatch):
+    calls = {"services": 0}
+    payloads = [
+        {"services": [SERVICES[0]]},
+        {"services": [SERVICES[1]]},
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/services":
+            calls["services"] += 1
+            return httpx.Response(200, json=payloads[calls["services"] - 1])
+        return httpx.Response(404, json={"error": "not found"})
+
+    # A negative TTL makes the cache immediately "stale" after the first fill 
+    # so the second /services call refetches upstream.
+    monkeypatch.setattr(main, "SERVICES_CACHE_TTL_SECONDS", -1)
+    _install_mock_transport(monkeypatch, handler)
+
+    with TestClient(main.app) as test_client:
+        first_response = test_client.get("/services")
+        second_response = test_client.get("/services")
+
+    assert first_response.status_code == 200
+    assert first_response.json() == payloads[0]
+    assert second_response.status_code == 200
+    assert second_response.json() == payloads[1]
+    assert calls["services"] == 2
+
+
+def test_metrics_client_is_shared_during_app_lifespan(monkeypatch):
+    calls = {"client_builds": 0, "services": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/services":
+            calls["services"] += 1
+            return httpx.Response(200, json={"services": SERVICES})
+        return httpx.Response(404, json={"error": "not found"})
+
+    def build_client() -> httpx.AsyncClient:
+        calls["client_builds"] += 1
+        return httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url="http://metrics.test",
+        )
+
+    main._clear_caches()
+    monkeypatch.setattr(main, "_build_metrics_client", build_client)
+
+    with TestClient(main.app) as test_client:
+        first_response = test_client.get("/services")
+        second_response = test_client.get("/services")
+
+        assert first_response.status_code == 200
+        assert first_response.json() == {"services": SERVICES}
+        assert second_response.status_code == 200
+        assert second_response.json() == {"services": SERVICES}
+        assert calls == {"client_builds": 1, "services": 1}
+
+    assert main._metrics_http_client is None
+
+
+@pytest.mark.anyio
+async def test_metrics_client_requires_app_lifespan():
+    main._metrics_http_client = None
+
+    with pytest.raises(RuntimeError, match="Metrics HTTP client is not initialized"):
+        async with main._metrics_client():
+            pass
+
+
+def test_list_recommendations_returns_error_item_for_failed_service(monkeypatch):
+    services = [SERVICES[0], SERVICES[1]]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/services":
+            return httpx.Response(200, json={"services": services})
+        if request.url.path == "/services/svc-001/metrics":
+            return httpx.Response(500, json={"error": "still down"})
+        if request.url.path == "/services/svc-002/metrics":
+            return httpx.Response(200, json=METRICS["svc-002"])
+        return httpx.Response(404, json={"error": "not found"})
+
+    _install_mock_transport(monkeypatch, handler)
+
+    with TestClient(main.app) as test_client:
+        response = test_client.get("/recommendations")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "service_id": "svc-001",
+            "service_name": "payment-processor",
+            "type": "lambda",
+            "error": "Metrics service returned HTTP 500",
+        },
+        EXPECTED_RECOMMENDATIONS[1],
+    ]
+
+
 def test_services_returns_502_for_invalid_services_payload(monkeypatch):
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/services":
@@ -291,7 +395,8 @@ def test_services_returns_502_for_invalid_services_payload(monkeypatch):
 
     _install_mock_transport(monkeypatch, handler)
 
-    response = TestClient(main.app).get("/services")
+    with TestClient(main.app) as test_client:
+        response = test_client.get("/services")
 
     assert response.status_code == 502
     assert response.json() == {
@@ -316,7 +421,8 @@ def test_single_recommendation_returns_502_for_invalid_metrics(monkeypatch):
 
     _install_mock_transport(monkeypatch, handler)
 
-    response = TestClient(main.app).get("/recommendations/svc-001")
+    with TestClient(main.app) as test_client:
+        response = test_client.get("/recommendations/svc-001")
 
     assert response.status_code == 502
     assert response.json() == {
@@ -337,7 +443,8 @@ def test_single_recommendation_returns_502_after_retry_exhaustion(monkeypatch):
 
     _install_mock_transport(monkeypatch, handler)
 
-    response = TestClient(main.app).get("/recommendations/svc-001")
+    with TestClient(main.app) as test_client:
+        response = test_client.get("/recommendations/svc-001")
 
     assert response.status_code == 502
     assert response.json() == {

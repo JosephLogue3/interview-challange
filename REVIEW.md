@@ -163,24 +163,59 @@ I asked the AI to implement its recommendations, along with the caching and test
 
 ---
 
+## My additional updates
+
+I reviewed the AI changes and made updates.
+
+---
+
+## Additional AI review
+
+I asked the AI to review again.
+
+---
+
 ## Additional Suggestions
+
+I have additional suggestions of my own and also consulted AI. 
 
 ### Suggestion 1: Add security
 
 Add authorization and validate inputs
 
-### Suggestion 2: Move METRICS_BASE_URL to an environmental file 
+### Suggestion 2: Centralize env variables and other configs in settings module 
 
-[app/main.py (line 9)](https://github.com/JosephLogue3/interview-challange/blob/main/app/main.py#L9) has the metric service URL hardcoded as a constant. This value should be moved to its own environment configuration file. 
+[app/main.py (line 9)](https://github.com/JosephLogue3/interview-challange/blob/main/app/main.py#L9) has the metric service URL hardcoded as a constant. This value should be moved to a singular settings module. 
 
 In the future, this makes the code structure more extensible, sunstainable, and testable. For example, additional constants can be added for different regions, development environments, and services. 
 
-### Suggestion 3: Add retries, logging, and monitoring for dependency service
+### Suggestion 3: Add retries, logging, monitoring, and better error handling for Metrics service
 
-Also recommended to add configuration management for timeout, retry count, and metrics base URL.
+This includes another check if we need more clear HTTP error codes returned for exceptions. 
+
+Also recommended to add better configuration management for timeout, retry count, and metrics base URL.
 
 ### Suggestion 4: Add TTL for caching
 
 Recommend to add a TTL to values in cache, and a most optimal caching strategy to save memory. 
 
+### Suggestion 5: Add docstrings
 
+Recommend to docstrings to methods and additional comments to explain confusing parts of code
+
+### Suggestion 6: `type` parm name in `list_recommendations()`
+
+Naming a parm "type" may fail Lint. This would be worth calling out in a review
+
+If this API is not already customer-facing, recommend naming this parm like "service_type"
+
+### Suggestion 7: Test API
+
+Mocks for test_API and WireMock can be aligned. This ensures unit test data matches what contributors see in Docker/WireMock runs, to prevent tests and local integration data from drifting apart (which can happen for example when new fields are added)
+
+Also, the tests right now are rather brittle. If I were writing tests for Best Egg's actual repo, I would update the tests for additional safeness. Example changes include:
+- `main._metrics_client` is patched with a bare lambda: `httpx.AsyncClient(...)`. It works for the tests but is easy to break if routes are ever changed to call _metrics_client. A stricter, safer test helper would patch with `contextlib.asynccontextmanager` around a factory
+
+### Suggestion 8: lint checks
+
+Changes need to be linted

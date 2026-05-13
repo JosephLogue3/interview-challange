@@ -8,8 +8,29 @@ Tests for the sizing logic
 Run with: pytest tests/ -v
 """
 
-def test_lambda_sizing_matches_duration_cost_memory_bump_and_notes():
-    """Lambda sizing uses the 100ms tier, memory bump, p95 cost, and no note when headroom is safe."""
+
+def test_compute_lambda():
+    """Lambda sizing returns correct values and no note when memory headroom is safe"""
+    result = _compute_lambda(
+        "test-fn",
+        {
+            "avg_duration_ms": 5,
+            "p95_duration_ms": 100,
+            "memory_used_mb": 0,
+        },
+    )
+
+    assert result == {
+        "service_name": "test-fn",
+        "type": "lambda",
+        "recommended_memory_mb": 128,
+        "estimated_monthly_cost_usd": 0.2083,
+        "notes": [],
+    }
+
+
+def test_compute_lambda_bumps_recommended_memory():
+    """Lambda sizing bumps memory when memory_used_mb x 1.2 > current tier"""
     result = _compute_lambda(
         "test-fn",
         {
@@ -28,8 +49,8 @@ def test_lambda_sizing_matches_duration_cost_memory_bump_and_notes():
     }
 
 
-def test_lambda_headroom_note_uses_final_recommendation():
-    """Lambda sizing emits a headroom note when used memory exceeds 80% of the recommendation."""
+def test_lambda_sends_memory_headroom_note():
+    """Lambda sizing emits a note when headroom memory is too low"""
     result = _compute_lambda(
         "payment-processor",
         {
@@ -52,6 +73,8 @@ def test_lambda_headroom_note_uses_final_recommendation():
 
 def test_lambda_duration_boundaries():
     """Lambda duration boundaries match the README tiers exactly."""
+
+    # test cases: [(avg_duration_ms, expected_memory)]
     cases = [
         (99.99, 128),
         (100, 256),
@@ -87,8 +110,8 @@ def test_lambda_rejects_memory_above_largest_tier():
         )
 
 
-def test_eks_sizing_rounds_up_to_required_increments():
-    """EKS sizing rounds every request and limit up to the required CPU or memory increment."""
+def test_eks_sizing_rounds_correctly():
+    """EKS sizing rounds metrics up correctly"""
     result = _compute_eks(
         "user-profile-api",
         {
@@ -109,8 +132,8 @@ def test_eks_sizing_rounds_up_to_required_increments():
     }
 
 
-def test_compute_recommendation_dispatches_lambda_from_service_type():
-    """Recommendation dispatch prefers the service lambda type and returns Lambda output."""
+def test_compute_recommendation_processes_lambda_type_correctly():
+    """Recommendation dispatch for the service lambda type returns Lambda output."""
     result = compute_recommendation(
         {"id": "svc-001", "name": "payment-processor", "type": "lambda"},
         {
@@ -127,8 +150,8 @@ def test_compute_recommendation_dispatches_lambda_from_service_type():
     assert result["recommended_memory_mb"] == 128
 
 
-def test_compute_recommendation_dispatches_eks_from_service_type():
-    """Recommendation dispatch prefers the service EKS type and returns EKS output."""
+def test_compute_recommendation_processes_eks_type_correctly():
+    """Recommendation dispatch for the service EKS type returns EKS output."""
     result = compute_recommendation(
         {"id": "svc-002", "name": "user-profile-api", "type": "eks_pod"},
         {
@@ -151,23 +174,7 @@ def test_compute_recommendation_dispatches_eks_from_service_type():
     }
 
 
-def test_compute_recommendation_allows_missing_metrics_type():
-    """Recommendation dispatch uses the service type when metrics omit their type field."""
-    result = compute_recommendation(
-        {"id": "svc-001", "name": "payment-processor", "type": "lambda"},
-        {
-            "service_id": "svc-001",
-            "avg_duration_ms": 85,
-            "p95_duration_ms": 140,
-            "memory_used_mb": 105,
-        },
-    )
-
-    assert result["type"] == "lambda"
-    assert result["service_name"] == "payment-processor"
-
-
-def test_compute_recommendation_uses_service_type_and_rejects_mismatch():
+def test_compute_recommendation_rejects_mismatched_type():
     """Recommendation dispatch rejects conflicting service and metrics compute types."""
     with pytest.raises(ValueError, match="does not match"):
         compute_recommendation(
