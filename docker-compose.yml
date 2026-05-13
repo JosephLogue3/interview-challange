@@ -1,7 +1,14 @@
 services:
   wiremock:
-    image: wiremock/wiremock
+    image: wiremock/wiremock:3.13.2
     ports:
       - "8080:8080"
     volumes:
       - ./wiremock:/home/wiremock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/__admin/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s

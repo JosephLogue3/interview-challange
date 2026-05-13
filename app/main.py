@@ -1,6 +1,8 @@
-import requests
-from fastapi import FastAPI
+import asyncio
 from typing import Optional
+
+import httpx
+from fastapi import FastAPI, HTTPException
 
 from app.sizing import compute_recommendation
 
@@ -10,34 +12,47 @@ METRICS_BASE_URL = "http://localhost:8080"
 
 _cache: dict = {}
 
+MAX_RETRIES = 3
+
+
+async def _get_metrics(client: httpx.AsyncClient, service_id: str) -> dict:
+    """Fetch metrics for a service, retrying up to MAX_RETRIES times on 500 errors."""
+    for attempt in range(MAX_RETRIES):
+        resp = await client.get(f"{METRICS_BASE_URL}/services/{service_id}/metrics")
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code != 500 or attempt == MAX_RETRIES - 1:
+            resp.raise_for_status()  # raises for non-200; always raises on last attempt
+    raise RuntimeError(
+        "unreachable"
+    )  # MAX_RETRIES > 0 guarantees raise_for_status was called
+
 
 @app.get("/services")
 async def list_services():
-    resp = requests.get(f"{METRICS_BASE_URL}/services")
-    return resp.json()
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{METRICS_BASE_URL}/services")
+        return resp.json()
 
 
 @app.get("/recommendations")
 async def list_recommendations(type: Optional[str] = None):
-    services_resp = requests.get(f"{METRICS_BASE_URL}/services")
-    services = services_resp.json()["services"]
+    async with httpx.AsyncClient() as client:
+        services_resp = await client.get(f"{METRICS_BASE_URL}/services")
+        services = services_resp.json()["services"]
 
-    results = []
-    for svc in services:
-        if type and svc["type"] != type:
-            continue
+        if type:
+            services = [s for s in services if s["type"] == type]
 
-        try:
-            resp = requests.get(
-                f"{METRICS_BASE_URL}/services/{svc['id']}/metrics"
-            )
-            metrics = resp.json()
-            rec = compute_recommendation(svc, metrics)
-            results.append(rec)
-        except:
-            pass
+        async def fetch_one(svc: dict) -> Optional[dict]:
+            try:
+                metrics = await _get_metrics(client, svc["id"])
+                return compute_recommendation(svc, metrics)
+            except Exception:
+                return None
 
-    return results
+        results = await asyncio.gather(*[fetch_one(svc) for svc in services])
+        return [r for r in results if r is not None]
 
 
 @app.get("/recommendations/{service_id}")
@@ -45,22 +60,29 @@ async def get_recommendation(service_id: str):
     if service_id in _cache:
         return _cache[service_id]
 
-    try:
-        resp = requests.get(
-            f"{METRICS_BASE_URL}/services/{service_id}/metrics"
-        )
-        metrics = resp.json()
+    async with httpx.AsyncClient() as client:
+        try:
+            metrics = await _get_metrics(client, service_id)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise HTTPException(
+                    status_code=404, detail=f"Service '{service_id}' not found"
+                )
+            raise HTTPException(
+                status_code=502,
+                detail=f"Upstream metrics service error for '{service_id}'",
+            )
 
-        # Fetch the service list just to get the display name
-        all_services = requests.get(f"{METRICS_BASE_URL}/services").json()["services"]
-        svc = next(
-            (s for s in all_services if s["id"] == service_id),
-            {"id": service_id, "name": service_id, "type": metrics.get("type")},
-        )
+        all_services = (await client.get(f"{METRICS_BASE_URL}/services")).json()[
+            "services"
+        ]
+        svc = next((s for s in all_services if s["id"] == service_id), None)
+
+        if svc is None:
+            raise HTTPException(
+                status_code=404, detail=f"Service '{service_id}' not found"
+            )
 
         rec = compute_recommendation(svc, metrics)
-        _cache[service_id] = metrics
+        _cache[service_id] = rec  # cache the recommendation, not raw metrics
         return rec
-
-    except Exception as e:
-        return {"error": str(e)}
